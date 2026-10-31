@@ -3,8 +3,9 @@
 
 # In[14]:
 
-
-from openpyxl import load_workbook
+import argparse
+from tester import TEST_MODEL_FILE
+#from openpyxl import load_workbook
 import pandas as pd
 import time
 from datetime import datetime
@@ -278,108 +279,26 @@ def run_qc(workbooks):
 
 # In[36]:
 
-
-from datetime import datetime
-# VERSION 2.0
-
-SOURCE_DIR = './sgluc_files'
-
-gaussia_values = []
-workbooks = load_workbooks(SOURCE_DIR)  # Loading all workbooks in the sgluc folder into 'workbooks'
-rows = []
-
-# Run QC once against the loaded workbooks, then build a lookup of every
-# (filename, sheet name) pair that got flagged, so ingestion below can
-# skip them. Nothing here re-loads the files, so QC and ingestion are
-# guaranteed to be looking at the same sheets.
-qc_results = run_qc(workbooks)
-flagged_lookup = {
-    (r['filename'], flagged['sheet'])
-    for r in qc_results
-    for flagged in r['flagged_sheets']
-}
-
-for item in workbooks:
-    #print(item['filename'])
-    #print(item['workbook'].sheetnames)
-    gluc_file = item['filename']
-    sheets = item['workbook'].sheetnames
-    for name in sheets:
-        if (gluc_file, name) in flagged_lookup:
-            print(f"Skipping {gluc_file} | {name}: flagged by QC, see qc_report.log")
-            continue
-        ws = item['workbook'][name]
-        model_id = get_model_number(ws.title)
-        passage = get_passage_number(ws.title)
-        #print(ws.title)
-        for cell in ws["B"]:
-            if isinstance(cell.value, datetime):  # Check for the first date in column B
-                #print(f"Datetime in {name}: {cell.value} at {cell.coordinate}")
-                input_date = cell.value
-                row_num = cell.row
-
-                # Check first 9 real-data columns (C onward, skipping A and the date in B)
-                first_nine = [ws.cell(row=row_num, column=c).value for c in range(3, 12)]
-                if not any(isinstance(v, (int, float)) for v in first_nine):
-                    print(f"Row {row_num} has no numeric values in first 9 columns, skipping")
-                    continue
-
-                for col_index in range(1, ws.max_column + 1):
-                    target_cell = ws.cell(row=row_num, column=col_index)
-                    #print(target_cell.value)
-
-                    if col_index <= 2:   # skip column A and column B (the date column)
-                        continue
-
-                    next_cell = ws.cell(row=row_num, column=col_index + 1)
-                    prev_cell = ws.cell(row=row_num, column=col_index - 1)
-                    gaussia_values.append(target_cell.value)
-
-                    if (target_cell.value is None
-                            and next_cell.value is not None
-                            and prev_cell.value is not None):
-                        #print("This is the dividing none")
-                        break
-                        
-                    if(target_cell.value is None and next_cell.value is None):  #Checks if the next cells are empty
-                        n = 0
-                        found_non_empty = False
-                        while n < 9 and (col_index + n) <= ws.max_column:
-                            s_cell = ws.cell(row=row_num, column=col_index + n)
-                            if s_cell.value is not None:
-                                found_non_empty = True
-                                break
-                            n += 1
-                        if found_non_empty:
-                            continue
-                        break
-                    
-                mice = group_numbers(gaussia_values)
-                for designation, values in mice.items():
-                    try:
-                        value1, value2, value3 = values
-                    except ValueError:
-                        print(f"Skipping {designation}: expected 3 values, got {values}")
-                        continue
-                    else:
-                        rows.append({
-                            'model': model_id,
-                            'passage': passage,
-                            'date': input_date,
-                            'designation': designation,
-                            'value1': value1,
-                            'value2': value2,
-                            'value3': value3,
-                        })
-
-                gaussia_values = []
-
-# In[37]:
-
-
-df = pd.DataFrame(rows, columns=['model', 'passage', 'date', 'designation', 'value1', 'value2', 'value3'])
-
-# In[ ]:
-
-
-df.to_excel('output_1.xlsx', sheet_name='gaussia_inputs', index=False)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Run QC against an already-loaded list of workbook items (see")
+    parser.add_argument("-d", help="List of workbook items to run.") #  nargs="+"
+    parser.add_argument("-f", help="File to run.")
+    args = parser.parse_args()
+    try:
+        print(args)
+        if args.d:
+            print(f'This workbook folders.{args.d}')
+            # os & glob
+            my_tester = TEST_MODEL_FILE('myfile.xls')
+        elif args.f:
+            # SOURCE_DIR = './sgluc_files'
+            print(f'This workbook file.{args.f}')
+        else:
+            print('No workbook folder selected.')
+        #gaussia_values = []
+        #workbooks = load_workbooks(SOURCE_DIR)  # Loading all workbooks in the sgluc folder into 'workbooks'
+        #rows = []
+    except Exception as e:
+        print(str(e))
+    finally:
+        print('Done')
