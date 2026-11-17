@@ -1,8 +1,9 @@
+
 #!/usr/bin/env python
 # coding: utf-8
-
+ 
 # In[14]:
-
+ 
 import argparse
 from tester import TEST_MODEL_FILE
 from openpyxl import load_workbook
@@ -13,27 +14,27 @@ import re
 from collections import defaultdict
 import os
 from itertools import groupby
-
+ 
 # #### Project: These set of functions together take an excel file that tracks a certain cell line growth in our lab and converts it into a dataframe format.
-
+ 
 # In[15]:
-
-
+ 
+ 
 ### Step 1: Classify sheet as 'good' format or 'bad' format
-
+ 
 # In[16]:
-
-
+ 
+ 
 ### Step 2: For a good format sheet, On column b, look for the second date on that column. Look for uninterrupted chains of numbers where the chain length is divisble by 3 on that row with the date. 
 ##Once you've identified the chains, split that chain up. 
 ## If the chain is more than 1 cell from the date then don't proceed.
 ### Save the date, save the file name, get the passage from the sheet name. v1 you get from the first 3 in thatchain
 ### v2 you get from the second and v3 the third. The letter comes from counting the first multiple of the chain
 #### Save that data in a dataframe.
-
+ 
 # In[17]:
-
-
+ 
+ 
 def load_workbooks(folder_path): #Loads all workbooks in a folder 
     workbooks = []
     for filename in os.listdir(folder_path):
@@ -42,10 +43,10 @@ def load_workbooks(folder_path): #Loads all workbooks in a folder
             wb = load_workbook(path)
             workbooks.append({'filename': filename, 'path': path, 'workbook': wb})
     return workbooks
-
+ 
 # In[18]:
-
-
+ 
+ 
 def parse_gbx_string(s):
     match = re.match(r'^GBX(\d+)P(\d+)', s)
     if not match:
@@ -55,37 +56,37 @@ def parse_gbx_string(s):
     passage_number = match.group(2)
     
     return model_number, passage_number
-
+ 
 def get_model_number(s):
     return parse_gbx_string(s)[0]
-
+ 
 def get_passage_number(s):
     return parse_gbx_string(s)[1]
-
+ 
 def get_attempt_number(s):
     """GBX683P1_2 -> 2. No underscore (or nothing after it) -> 1."""
     return TEST_MODEL_FILE.parse_sheet_title(s)[2]
-
+ 
 # In[19]:
-
-
+ 
+ 
 def group_numbers(nums):
     trimmed = nums[:-4]
     result = {}
     for i, val in enumerate(trimmed):
         letter = chr(ord('A') + i // 3)
         result.setdefault(letter, []).append(val)
-
+ 
     # Drop any key whose group has a None, or doesn't have exactly 3 values
     result = {
         k: v for k, v in result.items()
         if len(v) == 3 and None not in v
     }
     return result
-
+ 
 # In[20]:
-
-
+ 
+ 
 def drop_non_numerics(lst):
     result = []
     for x in lst:
@@ -99,17 +100,17 @@ def drop_non_numerics(lst):
             except ValueError:
                 pass
     return result
-
+ 
 # In[34]:
-
-
+ 
+ 
 """
 QC pass for sgluc Excel files, meant to run BEFORE gaussia_values ingestion.
-
+ 
 Strategy: skip + log. Nothing here modifies source files. Any sheet with a
 flagged issue is left out of the "clean" list and written to the report,
 so it can be fixed by hand in Excel and re-checked.
-
+ 
 Checks:
 - Sheet title parses into model_id/passage
 - Every date row (col B) has a dividing None found via the same forward
@@ -117,33 +118,33 @@ Checks:
   flagged; more than one missing divider in a sheet is treated as a
   real pattern and gets flagged.
 - Value count before the divider is a clean multiple of 3 (triplets)
-
+ 
 Assumes the same helper functions used in the ingestion script
 (get_model_number, get_passage_number, load_workbooks) are importable
 from your existing utils module — swap the import below to match.
 """
-
+ 
 from datetime import datetime
 import logging
 from pathlib import Path
-
+ 
 # from your_utils_module import load_workbooks, get_model_number, get_passage_number
-
+ 
 logging.basicConfig(
     filename='qc_report.log',
     filemode='w',
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(message)s'
 )
-
+ 
 DATA_START_COL = 3  # column C — first real-data column, matches ingestion script
-
-
+ 
+ 
 def find_date_rows(ws):
     """Return list of row numbers in column B that hold a real datetime."""
     return [cell.row for cell in ws["B"] if isinstance(cell.value, datetime)]
-
-
+ 
+ 
 def check_title_parses(ws_title):
     """Try the same title parsing the ingestion script relies on."""
     try:
@@ -154,8 +155,8 @@ def check_title_parses(ws_title):
         return model_id, passage, None
     except Exception as e:
         return None, None, f"Title '{ws_title}' failed to parse: {e}"
-
-
+ 
+ 
 def scan_row(ws, row_num):
     """
     Replicates the ingestion script's forward scan from column C, looking
@@ -190,14 +191,14 @@ def scan_row(ws, row_num):
             break
         values.append(target_cell.value)
     return has_divider, values
-
-
+ 
+ 
 def check_dividers_and_triplets(ws, date_rows):
     """
     For each date row, check whether a dividing None was found at all, and
     whether the values collected before it are a clean multiple of 3
     (group_numbers expects triplets).
-
+ 
     A single date row missing its divider isn't flagged on its own — but
     if MORE THAN ONE date row in the sheet is missing a divider, that's
     a pattern worth flagging rather than a one-off.
@@ -218,58 +219,58 @@ def check_dividers_and_triplets(ws, date_rows):
                 f"Row {row_num}: {len(values)} data columns found before dividing gap, "
                 f"not divisible by 3 (check for a missing/extra replicate or stray value)"
             )
-
+ 
     if len(missing_divider_rows) > 1:
         issues.append(
             f"{len(missing_divider_rows)} date row(s) with no dividing None found: "
             f"rows {missing_divider_rows}"
         )
-
+ 
     return issues
-
-
+ 
+ 
 def qc_check_workbook(item):
     filename = item['filename']
     wb = item['workbook']
     result = {'filename': filename, 'clean_sheets': [], 'flagged_sheets': []}
-
+ 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         issues = []
-
+ 
         model_id, passage, title_err = check_title_parses(ws.title)
         if title_err:
             issues.append(title_err)
-
+ 
         date_rows = find_date_rows(ws)
         if not date_rows:
             issues.append("No datetime found in column B")
         else:
             issues.extend(check_dividers_and_triplets(ws, date_rows))
-
+ 
         if issues:
             for issue in issues:
                 logging.warning(f"{filename} | {sheet_name} | {issue}")
             result['flagged_sheets'].append({'sheet': sheet_name, 'issues': issues})
         else:
             result['clean_sheets'].append(sheet_name)
-
+ 
     return result
-
-
+ 
+ 
 # In[35]:
-
-
+ 
+ 
 def run_qc(workbooks):
     """Run QC against an already-loaded list of workbook items (see
     load_workbooks). Returns the per-workbook results; does not load
     anything itself, so QC and ingestion always see the exact same
     in-memory sheets."""
     all_results = [qc_check_workbook(item) for item in workbooks]
-
+ 
     total_flagged = sum(len(r['flagged_sheets']) for r in all_results)
     total_clean = sum(len(r['clean_sheets']) for r in all_results)
-
+ 
     print(f"QC complete: {total_clean} sheet(s) clean, {total_flagged} sheet(s) flagged.")
     if total_flagged:
         print("\nFlagged sheets:")
@@ -279,20 +280,21 @@ def run_qc(workbooks):
                 for issue in flagged['issues']:
                     print(f"    - {issue}")
     return all_results
-
-
+ 
+ 
 # In[36]:
-
+ 
 def load_one(path):
     """Load a single workbook in the same item shape load_workbooks() returns."""
     return {'filename': os.path.basename(path), 'path': path, 'workbook': load_workbook(path)}
-
-
-def designation_letters(ws, header_row):
-    """Designation letters (A, B, C...) read from the header row that sits
-    directly above the first date row. Reads left to right from column C and
-    stops at the 'Negative' control column, so the control is never a letter."""
-    letters = []
+ 
+ 
+def designation_columns(ws, header_row):
+    """[(letter, start_col), ...] from the header row above the first date row.
+    Reads left to right from column C and stops at the 'Negative' control
+    column, so the control is never a designation. Each letter owns the 3
+    columns starting at start_col (its triplicate)."""
+    found = []
     for col in range(DATA_START_COL, ws.max_column + 1):
         val = ws.cell(row=header_row, column=col).value
         if isinstance(val, str):
@@ -300,14 +302,32 @@ def designation_letters(ws, header_row):
             if label.lower() == 'negative':
                 break
             if len(label) == 1 and label.isalpha():
-                letters.append(label.upper())
-    return letters
-
-
+                found.append((label.upper(), col))
+    return found
+ 
+ 
+def designation_letters(ws, header_row):
+    return [letter for letter, _ in designation_columns(ws, header_row)]
+ 
+ 
+def read_triplet(ws, row, start_col):
+    """The 3 replicate readings for one mouse on one date row, read by column
+    position (not by order), so a harvested/blank mouse can't shift the
+    others. Returns (values, status): status is 'ok', 'empty' (nothing
+    numeric, e.g. blank or a harvest note) or 'partial' (1-2 numbers)."""
+    cells = [ws.cell(row=row, column=start_col + i).value for i in range(3)]
+    nums = [drop_non_numerics([c]) for c in cells]
+    n_ok = sum(1 for n in nums if n)
+    if n_ok == 3:
+        return tuple(n[0] for n in nums), 'ok'
+    return None, ('empty' if n_ok == 0 else 'partial')
+ 
+ 
 def build_records(workbooks, sheet=None, designation=None):
     """Loop every sheet of every workbook. Returns (records, skipped, warnings).
-    One TEST_MODEL_FILE per designation letter per sheet.
-
+    One TEST_MODEL_FILE per designation letter per measurement date per sheet,
+    carrying that mouse's 3 replicate values.
+ 
     The FIRST date row in column B is the injection date (day 0) and holds no
     measurements: it is recorded as first_date but never read for data. Real
     data starts on the second date row."""
@@ -331,32 +351,60 @@ def build_records(workbooks, sheet=None, designation=None):
                 skipped.append((item['filename'], sheet_name,
                                 "only the first (day 0) date is present, no data rows yet"))
                 continue
-            letters = designation_letters(ws, date_rows[0] - 1)
-            if not letters:
+            columns = designation_columns(ws, date_rows[0] - 1)
+            if not columns:
                 skipped.append((item['filename'], sheet_name,
                                 f"no designation letters found in header row {date_rows[0] - 1}"))
                 continue
-            # cross-check: triplets on the first data row = letters + 1 Negative control
-            _, values = scan_row(ws, date_rows[1])
-            n_triplets = len(drop_non_numerics(values)) // 3
-            if n_triplets != len(letters) + 1:
+            # cross-check on the first data row: triplets = letters + 1 Negative control
+            _, first_vals = scan_row(ws, date_rows[1])
+            n_triplets = len(drop_non_numerics(first_vals)) // 3
+            if n_triplets != len(columns) + 1:
                 warnings.append((item['filename'], sheet_name,
-                                 f"{len(letters)} letter(s) in header but {n_triplets} triplet(s) "
+                                 f"{len(columns)} letter(s) in header but {n_triplets} triplet(s) "
                                  f"on row {date_rows[1]} (expected letters + 1 Negative)"))
-            for letter in letters:
-                if designation and letter != designation.upper():
-                    continue
-                records.append(TEST_MODEL_FILE.from_worksheet(
-                    item['filename'], ws, designation=letter))
+            partial = []
+            for row_num in date_rows[1:]:           # skip row 0: day 0, no data
+                row_date = ws.cell(row=row_num, column=2).value
+                for letter, start_col in columns:
+                    if designation and letter != designation.upper():
+                        continue
+                    values, status = read_triplet(ws, row_num, start_col)
+                    if status == 'partial':
+                        partial.append(f"row {row_num} {letter}")
+                    if status != 'ok':
+                        continue                    # harvested / no reading this date
+                    records.append(TEST_MODEL_FILE.from_worksheet(
+                        item['filename'], ws, designation=letter,
+                        date=row_date, values=values))
+            if partial:
+                warnings.append((item['filename'], sheet_name,
+                                 f"incomplete triplet (1-2 numbers) left out at: {', '.join(partial)}"))
     return records, skipped, warnings
-
-
+ 
+ 
+def run(workbooks, sheet=None, designation=None):
+    """QC the loaded workbooks, build the records, return (df, qc_results).
+    QC only reports; it never removes sheets, so you can compare the QC
+    report against what ended up in the dataframe."""
+    qc_results = run_qc(workbooks)
+    records, skipped, warnings = build_records(workbooks, sheet=sheet, designation=designation)
+    for fname, sname, reason in warnings:
+        print(f'WARNING {fname} | {sname} | {reason}')
+    for fname, sname, reason in skipped:
+        print(f'SKIPPED {fname} | {sname} | {reason}')
+    df = pd.DataFrame([r.to_dict() for r in records])
+    return df, qc_results
+ 
+ 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Build TEST_MODEL_FILE records from gaussia Excel files.")
     parser.add_argument("-d", help="Folder of workbooks to run.")
     parser.add_argument("-f", help="Single workbook file to run.")
     parser.add_argument("--sheet", help="Only process the sheet with this exact title, e.g. GBX683P1_2.")
     parser.add_argument("--designation", help="Only keep this designation letter, e.g. A.")
+    parser.add_argument("-o", "--output", default="gaussia_inputs.xlsx",
+                        help="Excel file to write the dataframe to (default gaussia_inputs.xlsx).")
     args = parser.parse_args()
     try:
         if args.d:
@@ -367,15 +415,13 @@ if __name__ == '__main__':
             workbooks = []
             print('No workbook folder or file selected.')
         if workbooks:
-            records, skipped, warnings = build_records(workbooks, sheet=args.sheet,
-                                                       designation=args.designation)
-            df = pd.DataFrame([r.to_dict() for r in records])
+            df, qc_results = run(workbooks, sheet=args.sheet, designation=args.designation)
             print(df.to_string(index=False) if not df.empty else 'No records built.')
-            for fname, sname, reason in warnings:
-                print(f'WARNING {fname} | {sname} | {reason}')
-            for fname, sname, reason in skipped:
-                print(f'SKIPPED {fname} | {sname} | {reason}')
+            if not df.empty:
+                df.to_excel(args.output, sheet_name='gaussia_inputs', index=False)
+                print(f'Wrote {len(df)} row(s) to {args.output}')
     except Exception as e:
         print(str(e))
     finally:
         print('Done')
+ 
