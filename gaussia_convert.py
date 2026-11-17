@@ -288,18 +288,30 @@ def load_one(path):
     return {'filename': os.path.basename(path), 'path': path, 'workbook': load_workbook(path)}
 
 
-def designation_letters(ws, date_row):
-    """Letters (A, B, C...) for each full triplet of numeric values found
-    on the given date row, using the same forward scan as the QC pass."""
-    _, values = scan_row(ws, date_row)
-    values = drop_non_numerics(values)
-    return [chr(ord('A') + i) for i in range(len(values) // 3)]
+def designation_letters(ws, header_row):
+    """Designation letters (A, B, C...) read from the header row that sits
+    directly above the first date row. Reads left to right from column C and
+    stops at the 'Negative' control column, so the control is never a letter."""
+    letters = []
+    for col in range(DATA_START_COL, ws.max_column + 1):
+        val = ws.cell(row=header_row, column=col).value
+        if isinstance(val, str):
+            label = val.strip()
+            if label.lower() == 'negative':
+                break
+            if len(label) == 1 and label.isalpha():
+                letters.append(label.upper())
+    return letters
 
 
 def build_records(workbooks, sheet=None, designation=None):
-    """Loop every sheet of every workbook and return (records, skipped).
-    One TEST_MODEL_FILE per designation letter per sheet."""
-    records, skipped = [], []
+    """Loop every sheet of every workbook. Returns (records, skipped, warnings).
+    One TEST_MODEL_FILE per designation letter per sheet.
+
+    The FIRST date row in column B is the injection date (day 0) and holds no
+    measurements: it is recorded as first_date but never read for data. Real
+    data starts on the second date row."""
+    records, skipped, warnings = [], [], []
     for item in workbooks:
         wb = item['workbook']
         for sheet_name in wb.sheetnames:
@@ -315,15 +327,28 @@ def build_records(workbooks, sheet=None, designation=None):
             if not date_rows:
                 skipped.append((item['filename'], sheet_name, "no datetime in column B"))
                 continue
-            letters = designation_letters(ws, date_rows[0])
+            if len(date_rows) < 2:
+                skipped.append((item['filename'], sheet_name,
+                                "only the first (day 0) date is present, no data rows yet"))
+                continue
+            letters = designation_letters(ws, date_rows[0] - 1)
             if not letters:
-                skipped.append((item['filename'], sheet_name, "no complete triplet of values on first date row"))
+                skipped.append((item['filename'], sheet_name,
+                                f"no designation letters found in header row {date_rows[0] - 1}"))
+                continue
+            # cross-check: triplets on the first data row = letters + 1 Negative control
+            _, values = scan_row(ws, date_rows[1])
+            n_triplets = len(drop_non_numerics(values)) // 3
+            if n_triplets != len(letters) + 1:
+                warnings.append((item['filename'], sheet_name,
+                                 f"{len(letters)} letter(s) in header but {n_triplets} triplet(s) "
+                                 f"on row {date_rows[1]} (expected letters + 1 Negative)"))
             for letter in letters:
                 if designation and letter != designation.upper():
                     continue
                 records.append(TEST_MODEL_FILE.from_worksheet(
                     item['filename'], ws, designation=letter))
-    return records, skipped
+    return records, skipped, warnings
 
 
 if __name__ == '__main__':
@@ -342,10 +367,12 @@ if __name__ == '__main__':
             workbooks = []
             print('No workbook folder or file selected.')
         if workbooks:
-            records, skipped = build_records(workbooks, sheet=args.sheet,
-                                             designation=args.designation)
+            records, skipped, warnings = build_records(workbooks, sheet=args.sheet,
+                                                       designation=args.designation)
             df = pd.DataFrame([r.to_dict() for r in records])
             print(df.to_string(index=False) if not df.empty else 'No records built.')
+            for fname, sname, reason in warnings:
+                print(f'WARNING {fname} | {sname} | {reason}')
             for fname, sname, reason in skipped:
                 print(f'SKIPPED {fname} | {sname} | {reason}')
     except Exception as e:
